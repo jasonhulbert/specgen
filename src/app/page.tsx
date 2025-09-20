@@ -7,6 +7,7 @@ import { ProjectSelector } from '@/components/ProjectSelector'
 import { SpecInputForm } from '@/components/SpecInputForm'
 import { SpecOutputDisplay } from '@/components/SpecOutputDisplay'
 import { ClarifyingQuestions } from '@/components/ClarifyingQuestions'
+import { LLMSelector } from '@/components/LLMSelector'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -218,6 +219,8 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left Pane - Input */}
           <div className="space-y-6">
+            <LLMSelector />
+            
             <ProjectSelector
               selectedProject={selectedProject}
               onProjectSelect={handleProjectSelect}

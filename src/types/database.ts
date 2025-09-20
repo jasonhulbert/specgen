@@ -69,3 +69,11 @@ export interface SpecEvaluation {
   notes?: string
   created_at: Date
 }
+
+export interface LLMConfigRecord {
+  id: string
+  config_json: Record<string, any> // The LLMConfig object
+  is_active: number // 1 for true, 0 for false (IndexedDB compatibility)
+  created_at: Date
+  updated_at: Date
+}

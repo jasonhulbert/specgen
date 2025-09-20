@@ -1,6 +1,8 @@
 import { SpecOutput, SpecOutputSchema, ClarifyingQuestions, ClarifyingQuestionsSchema, SpecInput, ResolvedContext } from '@/types/schemas'
+import { llmConfigManager } from './llm/config'
+import { LLMAdapter, LLMMessage, LLMRequestOptions } from './llm/adapters'
 
-// LLM Provider configuration
+// Legacy interface for backward compatibility
 export interface LLMConfig {
   id: string
   provider: string
@@ -9,16 +11,6 @@ export interface LLMConfig {
   is_openai_compatible: boolean
   model: string
   api_key?: string
-}
-
-// Default LM Studio configuration
-export const DEFAULT_LLM_CONFIG: LLMConfig = {
-  id: 'local-model',
-  provider: 'local',
-  name: 'LM Studio Local Model',
-  base_url: 'http://localhost:1234',
-  is_openai_compatible: true,
-  model: 'local-model', // Generic model name - LM Studio often accepts any string here
 }
 
 // LLM Response types
@@ -31,12 +23,6 @@ export interface LLMResponse {
     timestamp: Date
     tokens_used?: number
   }
-}
-
-export interface LLMRequestOptions {
-  temperature?: number
-  max_tokens?: number
-  timeout?: number
 }
 
 // System prompts
@@ -60,12 +46,32 @@ export const CLARIFYING_QUESTIONS_PROMPT = `Given the input and resolved context
 
 IMPORTANT: Respond with ONLY a valid JSON object that matches the ClarifyingQuestions schema. Do not include any other text, markdown, or explanations.`
 
-// LLM Service class
+// LLM Service class - now uses the adapter system
 export class LLMService {
-  private config: LLMConfig
+  private configManager = llmConfigManager
 
-  constructor(config: LLMConfig = DEFAULT_LLM_CONFIG) {
-    this.config = config
+  constructor() {
+    // Service now uses the global config manager
+  }
+
+  // Get current adapter
+  private async getCurrentAdapter(): Promise<LLMAdapter> {
+    return await this.configManager.getAdapter()
+  }
+
+  // Get active configuration info
+  async getActiveConfiguration() {
+    return await this.configManager.getActiveConfiguration()
+  }
+
+  // Switch to a different LLM configuration
+  async switchConfiguration(configId: string): Promise<void> {
+    await this.configManager.setActiveConfiguration(configId)
+  }
+
+  // Get all available configurations
+  async getAvailableConfigurations() {
+    return await this.configManager.getAllConfigurations()
   }
 
   // Generate specification from input
@@ -271,7 +277,7 @@ RESPONSE FORMAT:
 `
   }
 
-  // Core LLM API call
+  // Core LLM API call using adapter system
   private async callLLM(
     prompt: string,
     schema: any,
@@ -279,58 +285,32 @@ RESPONSE FORMAT:
   ): Promise<LLMResponse> {
     const { temperature = 0.1, max_tokens = 4000, timeout = 60000 } = options
 
-    if (!this.config.is_openai_compatible) {
-      throw new Error('Only OpenAI-compatible APIs are currently supported')
+    const adapter = await this.getCurrentAdapter()
+    const activeConfig = await this.getActiveConfiguration()
+    
+    if (!activeConfig) {
+      throw new Error('No active LLM configuration found')
     }
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeout)
-
-    // Prepare the request payload
-    const requestBody = {
-      model: this.config.model,
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant that generates structured JSON responses.' },
-        { role: 'user', content: prompt }
-      ],
-      temperature,
-      max_tokens,
-      // Remove response_format for now as it might not be supported by LM Studio
-      // response_format: { type: 'json_object' }
-    }
+    const messages: LLMMessage[] = [
+      { role: 'system', content: 'You are a helpful assistant that generates structured JSON responses.' },
+      { role: 'user', content: prompt }
+    ]
 
     console.log('LLM Request:', {
-      url: `${this.config.base_url}/v1/chat/completions`,
-      body: requestBody
+      provider: activeConfig.config.provider,
+      model: activeConfig.config.model || 'default',
+      messages: messages.map(m => ({ role: m.role, content: m.content.substring(0, 100) + '...' }))
     })
 
     try {
-      const response = await fetch(`${this.config.base_url}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.config.api_key && { 'Authorization': `Bearer ${this.config.api_key}` }),
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
+      const response = await adapter.generateCompletion(messages, {
+        temperature,
+        max_tokens,
+        timeout,
       })
 
-      clearTimeout(timeoutId)
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error('LLM API Error Response:', errorText)
-        throw new Error(`LLM API error: ${response.status} ${response.statusText} - ${errorText}`)
-      }
-
-      const data = await response.json()
-      const content = data.choices?.[0]?.message?.content
-
-      if (!content) {
-        throw new Error('No content in LLM response')
-      }
-
-      console.log('Raw LLM Response:', content)
+      console.log('Raw LLM Response:', response.content.substring(0, 200) + '...')
 
       // Try to parse as direct JSON first
       let parsedJson: any
@@ -338,15 +318,15 @@ RESPONSE FORMAT:
 
       try {
         // First try to parse the entire content as JSON
-        parsedJson = JSON.parse(content.trim())
+        parsedJson = JSON.parse(response.content.trim())
       } catch (jsonError) {
         // If that fails, try to extract JSON from the content
-        const jsonMatch = content.match(/\{[\s\S]*\}/)
+        const jsonMatch = response.content.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
           try {
             parsedJson = JSON.parse(jsonMatch[0])
             // Extract summary from content before the JSON
-            const summaryPart = content.substring(0, jsonMatch.index).trim()
+            const summaryPart = response.content.substring(0, jsonMatch.index).trim()
             if (summaryPart) {
               summary = summaryPart
             }
@@ -355,7 +335,7 @@ RESPONSE FORMAT:
             throw new Error(`Failed to parse LLM response as JSON: ${jsonError}`)
           }
         } else {
-          console.error('No JSON found in response:', content)
+          console.error('No JSON found in response:', response.content)
           throw new Error('No valid JSON found in LLM response')
         }
       }
@@ -370,20 +350,19 @@ RESPONSE FORMAT:
           summary: summary,
           json: validated,
           model_info: {
-            model: this.config.model,
-            provider: this.config.provider,
+            model: response.model,
+            provider: activeConfig.config.provider,
             timestamp: new Date(),
-            tokens_used: data.usage?.total_tokens,
+            tokens_used: response.usage?.total_tokens,
           },
         }
       } catch (validationError) {
         console.error('Schema validation failed:', validationError)
-        console.error('Raw response that failed validation:', content)
+        console.error('Raw response that failed validation:', response.content)
         console.error('Parsed JSON that failed validation:', parsedJson)
         throw validationError
       }
     } catch (error) {
-      clearTimeout(timeoutId)
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error('LLM request timed out')
       }
@@ -394,3 +373,7 @@ RESPONSE FORMAT:
 
 // Default service instance
 export const llmService = new LLMService()
+
+// Export adapter system for advanced usage
+export { llmConfigManager } from './llm/config'
+export type { LLMConfig as AdapterConfig, LLMAdapter } from './llm/adapters'
