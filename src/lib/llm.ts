@@ -1,6 +1,7 @@
 import { SpecOutput, SpecOutputSchema, ClarifyingQuestions, ClarifyingQuestionsSchema, SpecInput, ResolvedContext } from '@/types/schemas'
 import { llmConfigManager } from './llm/config'
 import { LLMAdapter, LLMMessage, LLMRequestOptions } from './llm/adapters'
+import { templateEngine, TEMPLATE_NAMES, validateAllTemplates } from './llm/templates'
 
 // Legacy interface for backward compatibility
 export interface LLMConfig {
@@ -24,27 +25,6 @@ export interface LLMResponse {
     tokens_used?: number
   }
 }
-
-// System prompts
-export const SYSTEM_PROMPT = `You are a pragmatic product/engineering copilot trained on modern agile practices. You write **concise, unambiguous** specs. You prefer bullet‑point clarity over prose. You surface **ambiguities** and **risks** explicitly. You generate **structured JSON** that matches the provided schema, and an accompanying human‑readable summary.
-
-Guidelines:
-- Never fabricate org‑specific facts; ask questions instead
-- Use domain vocabulary only if present in the input/context or project context
-- Keep lists short and high‑signal; default max 7 items per list
-- Use stable IDs with today's date prefix for easy diffing
-- Keep acceptance criteria in Given/When/Then form for QA handoff
-- Always include QA and Docs placeholders in task breakdown
-- Group tasks with area and prereqs for natural ordering`
-
-export const CLARIFYING_QUESTIONS_PROMPT = `Given the input and resolved context, identify 3-5 questions that would most reduce ambiguity in the specification. Focus on:
-- Missing business logic or edge cases
-- Unclear functional requirements
-- Ambiguous stakeholder expectations
-- Technical implementation gaps
-- Integration dependencies
-
-IMPORTANT: Respond with ONLY a valid JSON object that matches the ClarifyingQuestions schema. Do not include any other text, markdown, or explanations.`
 
 // LLM Service class - now uses the adapter system
 export class LLMService {
@@ -159,88 +139,25 @@ export class LLMService {
     return Math.min(score, 1.0) // Cap at 1.0
   }
 
+  // Validate all templates (useful for debugging and testing)
+  validateTemplates() {
+    return validateAllTemplates()
+  }
+
   // Build spec generation prompt
   private buildSpecPrompt(
     input: SpecInput,
     resolvedContext: ResolvedContext,
     mode: 'draft' | 'final'
   ): string {
-    const today = new Date().toISOString().split('T')[0].replace(/-/g, '')
+    const systemPrompt = templateEngine.render(TEMPLATE_NAMES.SYSTEM)
     
-    return `${SYSTEM_PROMPT}
-
-RESOLVED PROJECT CONTEXT:
-${JSON.stringify(resolvedContext, null, 2)}
-
-USER INPUT:
-${JSON.stringify(input, null, 2)}
-
-INSTRUCTIONS:
-Generate a ${mode} specification using stable IDs prefixed with "${today}" (e.g., "FR-${today}-001", "T-${today}-001").
-
-CRITICAL SCHEMA REQUIREMENTS:
-- "input": Must include the exact input object provided above
-- "resolved_context": Must include the exact resolved context provided above  
-- "story": Object with "as_a", "i_want", "so_that", "acceptance_criteria" (array of strings)
-- "tasks": Array of objects, each with:
-  - "id": string (e.g., "T-${today}-001")
-  - "title": string (descriptive task name)
-  - "area": MUST be one of: "FE", "BE", "Infra", "QA", "Docs" (no other values allowed)
-  - "details": string (implementation details)
-  - "prereqs": array of strings (default: [])
-  - "artifacts": array of strings (default: [])
-- "estimation": Object with:
-  - "confidence": number between 0 and 1
-  - "complexity": one of "XS", "S", "M", "L", "XL"
-  - "drivers": array of strings
-  - "notes": string
-- "functional_requirements": Array with "id" and "statement" fields
-- "needs_clarification": Array (default: [])
-- "assumptions": Array of strings (default: [])
-- "dependencies": Array of strings (default: [])
-- "edge_cases": Array of strings (default: [])
-- "risks": Array with "risk" and "mitigation" fields (default: [])
-
-EXAMPLE STRUCTURE:
-{
-  "input": /* the exact input object */,
-  "resolved_context": /* the exact resolved context */,
-  "story": {
-    "as_a": "user",
-    "i_want": "to do something",
-    "so_that": "I achieve a goal",
-    "acceptance_criteria": ["Given...", "When...", "Then..."]
-  },
-  "tasks": [
-    {
-      "id": "T-${today}-001",
-      "title": "Setup frontend components",
-      "area": "FE",
-      "details": "Create React components for...",
-      "prereqs": [],
-      "artifacts": ["Component files"]
-    }
-  ],
-  "estimation": {
-    "confidence": 0.8,
-    "complexity": "M",
-    "drivers": ["New technology"],
-    "notes": "Standard implementation"
-  },
-  "functional_requirements": [
-    {
-      "id": "FR-${today}-001",
-      "statement": "System must..."
-    }
-  ],
-  "needs_clarification": [],
-  "assumptions": [],
-  "dependencies": [],
-  "edge_cases": [],
-  "risks": []
-}
-
-RESPOND WITH ONLY VALID JSON. NO OTHER TEXT.`
+    return templateEngine.render(TEMPLATE_NAMES.SPEC_GENERATION, {
+      system_prompt: systemPrompt,
+      resolved_context: resolvedContext,
+      input: input,
+      mode: mode,
+    })
   }
 
   // Build clarifying questions prompt
@@ -248,13 +165,10 @@ RESPOND WITH ONLY VALID JSON. NO OTHER TEXT.`
     input: SpecInput,
     resolvedContext: ResolvedContext
   ): string {
-    return `${CLARIFYING_QUESTIONS_PROMPT}
-
-RESOLVED PROJECT CONTEXT: ${JSON.stringify(resolvedContext, null, 2)}
-
-USER INPUT: ${JSON.stringify(input, null, 2)}
-
-Respond with a JSON object containing a "questions" array and "estimated_confidence" number.`
+    return templateEngine.render(TEMPLATE_NAMES.CLARIFYING_QUESTIONS, {
+      resolved_context: resolvedContext,
+      input: input,
+    })
   }
 
   // Build refinement prompt
@@ -262,19 +176,14 @@ Respond with a JSON object containing a "questions" array and "estimated_confide
     originalSpec: SpecOutput,
     answers: Array<{ question: string; answer: string }>
   ): string {
-    return `SYSTEM: ${SYSTEM_PROMPT}
-
-ORIGINAL SPECIFICATION: ${JSON.stringify(originalSpec, null, 2)}
-
-CLARIFYING ANSWERS:
-${answers.map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n')}
-
-INSTRUCTIONS:
-Update only the affected sections based on the clarifying answers. Return a partial specification object with only the changed fields.
-
-RESPONSE FORMAT:
-- Provide a JSON object with only the updated fields.
-`
+    const systemPrompt = templateEngine.render(TEMPLATE_NAMES.SYSTEM)
+    const answersFormatted = answers.map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n')
+    
+    return templateEngine.render(TEMPLATE_NAMES.REFINE_SPEC, {
+      system_prompt: systemPrompt,
+      original_spec: originalSpec,
+      answers_formatted: answersFormatted,
+    })
   }
 
   // Core LLM API call using adapter system

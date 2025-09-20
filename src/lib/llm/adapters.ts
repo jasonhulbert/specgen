@@ -239,7 +239,7 @@ export class AnthropicAdapter extends LLMAdapter {
   getModelInfo(): LLMModelInfo {
     const modelSpecs: Record<string, Partial<LLMModelInfo>> = {
       'claude-sonnet-4-20250514': {
-        name: 'Claude 3.5 Sonnet',
+        name: 'Claude Sonnet 4',
         context_length: 200000,
         supports_json_mode: true,
         cost_per_1k_tokens: { input: 0.003, output: 0.015 }
