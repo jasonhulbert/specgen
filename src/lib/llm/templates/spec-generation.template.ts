@@ -1,4 +1,4 @@
-export default `{{system_prompt}}
+const specGenerationTemplate = `{{system_prompt}}
 
 RESOLVED PROJECT CONTEXT:
 {{JSON.stringify(resolved_context)}}
@@ -71,4 +71,6 @@ EXAMPLE STRUCTURE:
   "risks": []
 }
 
-RESPOND WITH ONLY VALID JSON. NO OTHER TEXT.`
+RESPOND WITH ONLY VALID JSON. NO OTHER TEXT.`;
+
+export default specGenerationTemplate;

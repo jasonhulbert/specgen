@@ -19,7 +19,7 @@ interface LLMConfigManagerProps {
     showInModal?: boolean;
 }
 
-export function LLMConfigManager({ onConfigurationChange, showInModal = false }: LLMConfigManagerProps) {
+export function LLMConfigManager({ onConfigurationChange }: LLMConfigManagerProps) {
     const [configurations, setConfigurations] = useState<ConfigurationInfo[]>([]);
     const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
     const [showAddForm, setShowAddForm] = useState(false);
@@ -27,7 +27,7 @@ export function LLMConfigManager({ onConfigurationChange, showInModal = false }:
     const [customConfig, setCustomConfig] = useState<Record<string, string>>({});
     const [connectionStatus, setConnectionStatus] = useState<Record<string, boolean | null>>({});
     const [testing, setTesting] = useState<Record<string, boolean>>({});
-    const [loading, setLoading] = useState(true);
+    const [, setLoading] = useState(true);
 
     const getProviderDisplayName = (config: LLMConfig): string => {
         switch (config.provider) {

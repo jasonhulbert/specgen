@@ -66,7 +66,7 @@ export async function initDB(): Promise<IDBPDatabase<SpecGenDB>> {
     if (dbInstance) return dbInstance;
 
     dbInstance = await openDB<SpecGenDB>(DB_NAME, DB_VERSION, {
-        upgrade(db, oldVersion, newVersion, transaction) {
+        upgrade(db, oldVersion, newVersion) {
             console.log(`Upgrading database from version ${oldVersion} to ${newVersion}`);
 
             // Version 1: Create initial stores

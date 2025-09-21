@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { llmConfigManager } from '@/lib/llm/config';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { LLMConfigManager } from './LLMConfigManager';
 
 interface LLMSelectorProps {
     onConfigurationChange?: (configId: string) => void;
@@ -48,7 +49,6 @@ export function LLMSelector({ onConfigurationChange, showManageButton = true }: 
     const activeConfig = configurations.find((c) => c.id === activeConfigId);
 
     if (showManager) {
-        const { LLMConfigManager } = require('@/components/LLMConfigManager');
         return (
             <LLMConfigManager
                 onConfigurationChange={async (configId: string) => {
